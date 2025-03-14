@@ -33,7 +33,7 @@
     document.body.appendChild(renderer.domElement);
       
     // Mesa (superfície)
-    const geometryMesa = new THREE.BoxGeometry(10, 0.1, 5);
+    const geometryMesa = new THREE.BoxGeometry(10, 0.2, 5);
     const materialMesa = new THREE.MeshStandardMaterial({ 
     color: 0x006600, roughness: 0.4, metalness: 0.1 
     });
@@ -83,6 +83,55 @@
     chao.receiveShadow = true;
     scene.add(chao);
 
+    // Controlo de teclas
+    const keysPressed = {};
+
+    window.addEventListener('keydown', (event) => {
+        keysPressed[event.key.toLowerCase()] = true;
+    });
+
+    window.addEventListener('keyup', (event) => {
+        keysPressed[event.key.toLowerCase()] = false;
+    });
+
+    // Altura fixa da câmera ao nível do chão
+    const groundLevel = 2;
+    camera.position.y = groundLevel;
+
+    // Velocidade da câmara
+    const cameraSpeed = 0.1;
+
+    // Remover controles orbitais para evitar conflito
+    //controls.dispose(); // Se necessário, remove explicitamente
+
+    // Atualiza posição da câmera baseada nas teclas pressionadas
+    function updateCameraPosition() {
+        const forward = new THREE.Vector3();
+        camera.getWorldDirection(forward);
+        forward.y = 0;
+        forward.normalize();
+
+        const right = new THREE.Vector3();
+        right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+        if (keysPressed['w']) {
+            camera.position.addScaledVector(forward, cameraSpeed);
+        }
+        if (keysPressed['s']) {
+            camera.position.addScaledVector(forward, -cameraSpeed);
+        }
+        if (keysPressed['a']) {
+            camera.position.addScaledVector(right, -cameraSpeed);
+        }
+        if (keysPressed['d']) {
+            camera.position.addScaledVector(right, cameraSpeed);
+        }
+
+        // Mantém a altura da câmera ao nível do chão
+        camera.position.y = groundLevel;
+    }
+
+
     // Pernas da mesa
     const geometryPerna = new THREE.CylinderGeometry(0.1, 0.1, 0.75, 16);
     const materialPerna = new THREE.MeshStandardMaterial({ color: 0x552200 });
@@ -105,6 +154,7 @@
     // Loop de renderização
     function animate() {
         requestAnimationFrame(animate);
+        updateCameraPosition();
         controls.update();
         renderer.render(scene, camera);
     }
