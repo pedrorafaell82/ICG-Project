@@ -1,13 +1,9 @@
 <!DOCTYPE html>
-
 <html lang="en">
-
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-
-    <title> PoolGame </title>
-
+    <title>PoolGame</title>
     <link rel="stylesheet" href="style.css">
 
     <script type="importmap">
@@ -18,154 +14,134 @@
           }
         }
     </script>
-      
+
     <script type="module">
-    import * as THREE from 'three';
-    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-      
-    // Cena inicial básica em Three.js
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-      
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.shadowMap.enabled = true;
-    document.body.appendChild(renderer.domElement);
-      
-    // Mesa (superfície)
-    const geometryMesa = new THREE.BoxGeometry(10, 0.2, 5);
-    const materialMesa = new THREE.MeshStandardMaterial({ 
-    color: 0x006600, roughness: 0.4, metalness: 0.1 
-    });
-    const mesa = new THREE.Mesh(geometryMesa, materialMesa);
-    mesa.position.set(0, 0.8, 0);
-    mesa.receiveShadow = true;
-    scene.add(mesa);
-      
-    // Bola exemplo
-    const geometryBola = new THREE.SphereGeometry(0.1, 32, 32); // raio = 0.1 (diâmetro = 0.2)
-    const materialBola = new THREE.MeshStandardMaterial({ 
-    color: 0xffffff, roughness: 0.2, metalness: 0.8 
-    });
-    const bola = new THREE.Mesh(geometryBola, materialBola);
-    bola.castShadow = true;
-    bola.position.set(0, 0.95, 0);  // (altura mesa/2 + raio da bola)
-    scene.add(bola);
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 
-    const materialBola2 = new THREE.MeshStandardMaterial({ color: 0xf0ff00, roughness: 0.2, metalness: 0.8 });
-    const bola2 = new THREE.Mesh(geometryBola, materialBola2);
-    bola2.castShadow = true;
-    bola2.position.set(0.5, 0.95, 0.4);
-    scene.add(bola2);
-      
-    // Iluminação
-    const luz = new THREE.SpotLight(0xffffff, 200);
-    luz.position.set(0, 10, 0);
-    luz.castShadow = true;
-    scene.add(luz);
-      
-    // Controles de câmera orbitais
-    const controls = new OrbitControls(camera, renderer.domElement);
-    camera.position.set(0, 5, 10);
-    controls.update();
+        // Configuração básica da cena
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
 
-    scene.background = new THREE.Color(0xaaaaaa); // Cinza claro
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4); // intensidade leve
-    scene.add(ambientLight);
+        // Adicionar controle de cursor bloqueado
+        const controls = new PointerLockControls(camera, document.body);
 
-    // Chão
-    const geometryChao = new THREE.PlaneGeometry(50, 50);
-    const materialChao = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.8 });
-    const chao = new THREE.Mesh(geometryChao, materialChao);
+        // Evento para ativar o controle ao clicar na tela
+        document.addEventListener('click', () => {
+            controls.lock();
+        });
 
-    chao.rotation.x = -Math.PI / 2; // Rodar o chão para ficar horizontal
-    chao.receiveShadow = true;
-    scene.add(chao);
+        // Iluminação
+        const luz = new THREE.SpotLight(0xffffff, 200);
+        luz.position.set(0, 10, 0);
+        luz.castShadow = true;
+        scene.add(luz);
 
-    // Controlo de teclas
-    const keysPressed = {};
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
 
-    window.addEventListener('keydown', (event) => {
-        keysPressed[event.key.toLowerCase()] = true;
-    });
+        // Fundo da cena
+        scene.background = new THREE.Color(0xaaaaaa);
 
-    window.addEventListener('keyup', (event) => {
-        keysPressed[event.key.toLowerCase()] = false;
-    });
+        // Chão
+        const geometryChao = new THREE.PlaneGeometry(50, 50);
+        const materialChao = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.8 });
+        const chao = new THREE.Mesh(geometryChao, materialChao);
+        chao.rotation.x = -Math.PI / 2;
+        chao.receiveShadow = true;
+        scene.add(chao);
 
-    // Altura fixa da câmera ao nível do chão
-    const groundLevel = 2;
-    camera.position.y = groundLevel;
+        // Mesa de bilhar
+        const geometryMesa = new THREE.BoxGeometry(10, 0.2, 5);
+        const materialMesa = new THREE.MeshStandardMaterial({ color: 0x006600, roughness: 0.4, metalness: 0.1 });
+        const mesa = new THREE.Mesh(geometryMesa, materialMesa);
+        mesa.position.set(0, 0.8, 0);
+        mesa.receiveShadow = true;
+        scene.add(mesa);
 
-    // Velocidade da câmara
-    const cameraSpeed = 0.1;
+        // Bolas
+        const geometryBola = new THREE.SphereGeometry(0.1, 32, 32);
+        const materialBola1 = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2, metalness: 0.8 });
+        const bola1 = new THREE.Mesh(geometryBola, materialBola1);
+        bola1.castShadow = true;
+        bola1.position.set(0, 0.95, 0);
+        scene.add(bola1);
 
-    // Remover controles orbitais para evitar conflito
-    //controls.dispose(); // Se necessário, remove explicitamente
+        const materialBola2 = new THREE.MeshStandardMaterial({ color: 0xf0ff00, roughness: 0.2, metalness: 0.8 });
+        const bola2 = new THREE.Mesh(geometryBola, materialBola2);
+        bola2.castShadow = true;
+        bola2.position.set(0.5, 0.95, 0.4);
+        scene.add(bola2);
 
-    // Atualiza posição da câmera baseada nas teclas pressionadas
-    function updateCameraPosition() {
-        const forward = new THREE.Vector3();
-        camera.getWorldDirection(forward);
-        forward.y = 0;
-        forward.normalize();
+        // Pernas da mesa
+        const geometryPerna = new THREE.CylinderGeometry(0.1, 0.1, 0.75, 16);
+        const materialPerna = new THREE.MeshStandardMaterial({ color: 0x552200 });
 
-        const right = new THREE.Vector3();
-        right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+        const posicoesPernas = [
+            [-4.5, 0.375, -2], [4.5, 0.375, -2],
+            [-4.5, 0.375, 2], [4.5, 0.375, 2]
+        ];
 
-        if (keysPressed['w']) {
-            camera.position.addScaledVector(forward, cameraSpeed);
+        posicoesPernas.forEach(pos => {
+            const perna = new THREE.Mesh(geometryPerna, materialPerna);
+            perna.castShadow = true;
+            perna.position.set(pos[0], pos[1], pos[2]);
+            scene.add(perna);
+        });
+
+        // Definir posição inicial da câmara
+        camera.position.set(0, 2, 5);
+
+        // Configuração para movimento FPS
+        const keys = { w: false, a: false, s: false, d: false };
+        const speed = 0.1;
+
+        document.addEventListener('keydown', (event) => {
+            if (keys.hasOwnProperty(event.key.toLowerCase())) {
+                keys[event.key.toLowerCase()] = true;
+            }
+        });
+
+        document.addEventListener('keyup', (event) => {
+            if (keys.hasOwnProperty(event.key.toLowerCase())) {
+                keys[event.key.toLowerCase()] = false;
+            }
+        });
+
+        function updateCameraPosition() {
+            if (controls.isLocked) {
+                const direction = new THREE.Vector3();
+                camera.getWorldDirection(direction);
+                direction.y = 0;
+                direction.normalize();
+
+                const right = new THREE.Vector3();
+                right.crossVectors(camera.up, direction).normalize();
+
+                if (keys.w) camera.position.addScaledVector(direction, speed);
+                if (keys.s) camera.position.addScaledVector(direction, -speed);
+                if (keys.d) camera.position.addScaledVector(right, -speed);
+                if (keys.a) camera.position.addScaledVector(right, speed);
+
+                camera.position.y = 2; // Mantém a altura fixa
+            }
         }
-        if (keysPressed['s']) {
-            camera.position.addScaledVector(forward, -cameraSpeed);
-        }
-        if (keysPressed['a']) {
-            camera.position.addScaledVector(right, -cameraSpeed);
-        }
-        if (keysPressed['d']) {
-            camera.position.addScaledVector(right, cameraSpeed);
+
+        function animate() {
+            requestAnimationFrame(animate);
+            updateCameraPosition();
+            renderer.render(scene, camera);
         }
 
-        // Mantém a altura da câmera ao nível do chão
-        camera.position.y = groundLevel;
-    }
-
-
-    // Pernas da mesa
-    const geometryPerna = new THREE.CylinderGeometry(0.1, 0.1, 0.75, 16);
-    const materialPerna = new THREE.MeshStandardMaterial({ color: 0x552200 });
-
-    // Cria 4 pernas e posiciona corretamente
-    const posicoesPernas = [
-        [-4.5, 0.375, -2],   // traseira-esquerda
-        [4.5, 0.375, -2],    // traseira-direita
-        [-4.5, 0.375, 2],    // frente-esquerda
-        [4.5, 0.375, 2]      // frente-direita
-    ];
-
-    posicoesPernas.forEach(pos => {
-        const perna = new THREE.Mesh(geometryPerna, materialPerna);
-        perna.castShadow = true;
-        perna.position.set(pos[0], pos[1], pos[2]);
-        scene.add(perna);
-    });
-
-    // Loop de renderização
-    function animate() {
-        requestAnimationFrame(animate);
-        updateCameraPosition();
-        controls.update();
-        renderer.render(scene, camera);
-    }
-    animate();
+        animate();
     </script>
-      
-
 </head>
-
 <body>
-    <div id="Tag3DScene"> </div>
+    <div id="Tag3DScene"></div>
 </body>
-
 </html>
