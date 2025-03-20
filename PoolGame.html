@@ -36,6 +36,11 @@
             controls.lock();
         });
 
+        let velocityY = 0;        // Velocidade vertical
+        const gravity = -0.02;    // Gravidade aplicada ao jogador
+        const jumpStrength = 0.3; // Força do salto
+        const groundLevel = 2;    // Altura fixa do solo
+
         // Iluminação
         const luz = new THREE.SpotLight(0xffffff, 200);
         luz.position.set(0, 10, 0);
@@ -56,43 +61,23 @@
         chao.receiveShadow = true;
         scene.add(chao);
 
-        // Mesa de bilhar
-        const geometryMesa = new THREE.BoxGeometry(10, 0.2, 5);
-        const materialMesa = new THREE.MeshStandardMaterial({ color: 0x006600, roughness: 0.4, metalness: 0.1 });
-        const mesa = new THREE.Mesh(geometryMesa, materialMesa);
-        mesa.position.set(0, 0.8, 0);
-        mesa.receiveShadow = true;
-        scene.add(mesa);
+        // Mesa
+        addTable(0, 0)
 
         // Bolas
-        const geometryBola = new THREE.SphereGeometry(0.1, 32, 32);
-        const materialBola1 = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2, metalness: 0.8 });
-        const bola1 = new THREE.Mesh(geometryBola, materialBola1);
-        bola1.castShadow = true;
-        bola1.position.set(0, 0.95, 0);
-        scene.add(bola1);
+        addBall(0xffffff, 0, 1, 0);
+        addBall(0xf0ff00, 0.5, 1, 0.4);
+        addBall(0x000000, 1, 1, 1)
+        addBall(0x0000ff, 2, 1, 1)
+        addBall(0x00ff00, 3, 1, 1)
 
-        const materialBola2 = new THREE.MeshStandardMaterial({ color: 0xf0ff00, roughness: 0.2, metalness: 0.8 });
-        const bola2 = new THREE.Mesh(geometryBola, materialBola2);
-        bola2.castShadow = true;
-        bola2.position.set(0.5, 0.95, 0.4);
-        scene.add(bola2);
+        //Paredes
+        addWall(30, 5, 5, 6, 0); //Parede Direita
+        addWall(20, -9, -5, 6, 90); //Parede Fundo
+        addWall(30, 6, -15, 6, 0); //Parede Esquerda
+        addWall(20, 20, -5, 6, 90); //Parede Bar
+        addWall(10, 9, 0, 1, 90); //Mini Parede
 
-        // Pernas da mesa
-        const geometryPerna = new THREE.CylinderGeometry(0.1, 0.1, 0.75, 16);
-        const materialPerna = new THREE.MeshStandardMaterial({ color: 0x552200 });
-
-        const posicoesPernas = [
-            [-4.5, 0.375, -2], [4.5, 0.375, -2],
-            [-4.5, 0.375, 2], [4.5, 0.375, 2]
-        ];
-
-        posicoesPernas.forEach(pos => {
-            const perna = new THREE.Mesh(geometryPerna, materialPerna);
-            perna.castShadow = true;
-            perna.position.set(pos[0], pos[1], pos[2]);
-            scene.add(perna);
-        });
 
         // Definir posição inicial da câmara
         camera.position.set(0, 2, 5);
@@ -113,6 +98,74 @@
             }
         });
 
+        document.addEventListener('keydown', (event) => {
+            if (event.code === 'Space' && camera.position.y <= groundLevel) {
+                velocityY = jumpStrength;
+            }
+        });
+
+        function addTable(x, z) {
+            const tableGroup = new THREE.Group();
+
+            // Criar mesa
+            const geometryTable = new THREE.BoxGeometry(10, 0.2, 5);
+            const materialTable = new THREE.MeshStandardMaterial({ color: 0x006600, roughness: 0.4, metalness: 0.1 });
+            const table = new THREE.Mesh(geometryTable, materialTable);
+            table.position.set(0, 0.8, 0);
+            table.receiveShadow = true;
+            tableGroup.add(table);
+
+            // Criar pernas da mesa
+            const geometryPerna = new THREE.CylinderGeometry(0.1, 0.1, 0.75, 16);
+            const materialPerna = new THREE.MeshStandardMaterial({ color: 0x552200 });
+
+            const posicoesPernas = [
+                [-4.5, 0.375, -2], [4.5, 0.375, -2],
+                [-4.5, 0.375, 2], [4.5, 0.375, 2]
+            ];
+
+            posicoesPernas.forEach(pos => {
+                const perna = new THREE.Mesh(geometryPerna, materialPerna);
+                perna.castShadow = true;
+                perna.position.set(pos[0], pos[1], pos[2]);
+                tableGroup.add(perna);
+            });
+
+            // Definir posição do grupo
+            tableGroup.position.set(x, 0, z);
+            
+            // Adicionar à cena
+            scene.add(tableGroup);
+        }
+
+        function addWall(size, x, z, height, orientation) {
+            // Criar geometria da parede
+            const wallGeometry = new THREE.BoxGeometry(size, height, 0.5); // Largura definida por 'size', altura fixa em 3, espessura 0.5
+            const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x552200, roughness: 0.6 });
+
+            // Criar a parede
+            const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+            wall.position.set(x, height/2, z); // Mantém a altura fixa no solo
+            wall.receiveShadow = true;
+
+            // Aplicar rotação se for perpendicular (90 graus)
+            if (orientation == 90) {
+                wall.rotation.y = Math.PI / 2; // Rotaciona a parede para ficar perpendicular
+            }
+
+            // Adicionar à cena
+            scene.add(wall);
+        }
+
+        function addBall(color, x, y, z) {
+            const geometryBola = new THREE.SphereGeometry(0.1, 32, 32);
+            const materialBola = new THREE.MeshStandardMaterial({ color: color, roughness: 0.2, metalness: 0 });
+            const bola = new THREE.Mesh(geometryBola, materialBola);
+            bola.castShadow = true;
+            bola.position.set(x, y, z);
+            scene.add(bola);
+        }
+
         function updateCameraPosition() {
             if (controls.isLocked) {
                 const direction = new THREE.Vector3();
@@ -128,7 +181,13 @@
                 if (keys.d) camera.position.addScaledVector(right, -speed);
                 if (keys.a) camera.position.addScaledVector(right, speed);
 
-                camera.position.y = 2; // Mantém a altura fixa
+                velocityY += gravity;
+                camera.position.y += velocityY;
+
+                if (camera.position.y <= groundLevel) {
+                    camera.position.y = groundLevel;
+                    velocityY = 0;
+                }
             }
         }
 
