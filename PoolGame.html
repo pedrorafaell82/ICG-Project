@@ -116,27 +116,51 @@
             tableGroup.add(table);
 
             // Criar pernas da mesa
-            const geometryPerna = new THREE.CylinderGeometry(0.1, 0.1, 0.75, 16);
-            const materialPerna = new THREE.MeshStandardMaterial({ color: 0x552200 });
-
-            const posicoesPernas = [
+            const geometryLeg = new THREE.CylinderGeometry(0.1, 0.1, 0.75, 16);
+            const materialLeg = new THREE.MeshStandardMaterial({ color: 0x552200 });
+            const legPositions = [
                 [-4.5, 0.375, -2], [4.5, 0.375, -2],
-                [-4.5, 0.375, 2], [4.5, 0.375, 2]
+                [-4.5, 0.375, 2],  [4.5, 0.375, 2]
             ];
-
-            posicoesPernas.forEach(pos => {
-                const perna = new THREE.Mesh(geometryPerna, materialPerna);
-                perna.castShadow = true;
-                perna.position.set(pos[0], pos[1], pos[2]);
-                tableGroup.add(perna);
+            legPositions.forEach(pos => {
+                const leg = new THREE.Mesh(geometryLeg, materialLeg);
+                leg.castShadow = true;
+                leg.position.set(pos[0], pos[1], pos[2]);
+                tableGroup.add(leg);
             });
 
-            // Definir posição do grupo
+            // **Cushions**
+            const cushionHeight = 0.2;
+            const cushionThickness = 0.3;
+            const cushionMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.5 });
+
+            // Long cushions (ao longo do eixo X)
+            const geometryCushionLong = new THREE.BoxGeometry(10, cushionHeight, cushionThickness);
+            const cushionLongTop = new THREE.Mesh(geometryCushionLong, cushionMaterial);
+            cushionLongTop.position.set(0, 0.9 + cushionHeight / 2, 2.5 + cushionThickness / 2);
+            cushionLongTop.receiveShadow = true;
+            tableGroup.add(cushionLongTop);
+
+            const cushionLongBottom = cushionLongTop.clone();
+            cushionLongBottom.position.set(0, 0.9 + cushionHeight / 2, -2.5 - cushionThickness / 2);
+            tableGroup.add(cushionLongBottom);
+
+            // Short cushions (ao longo do eixo Z)
+            const geometryCushionShort = new THREE.BoxGeometry(cushionThickness, cushionHeight, 5 + 2 * cushionThickness);
+            const cushionShortLeft = new THREE.Mesh(geometryCushionShort, cushionMaterial);
+            cushionShortLeft.position.set(-5 - cushionThickness / 2, 0.9 + cushionHeight / 2, 0);
+            cushionShortLeft.receiveShadow = true;
+            tableGroup.add(cushionShortLeft);
+
+            const cushionShortRight = cushionShortLeft.clone();
+            cushionShortRight.position.set(5 + cushionThickness / 2, 0.9 + cushionHeight / 2, 0);
+            tableGroup.add(cushionShortRight);
+
+            // Definir posição do grupo e adicionar à cena
             tableGroup.position.set(x, 0, z);
-            
-            // Adicionar à cena
             scene.add(tableGroup);
         }
+
 
         function addWall(size, x, z, height, orientation) {
             // Criar geometria da parede
