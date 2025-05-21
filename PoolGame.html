@@ -3,228 +3,294 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>PoolGame</title>
+    <title>PoolGame – Physics Edition</title>
     <link rel="stylesheet" href="style.css">
 
+    <!-- Three.js, examples + Cannon‑ES via modern import‑map -->
     <script type="importmap">
-        {
-          "imports": {
-            "three": "https://threejs.org/build/three.module.js",
-            "three/addons/": "https://threejs.org/examples/jsm/"
-          }
+      {
+        "imports": {
+          "three": "https://threejs.org/build/three.module.js",
+          "three/addons/": "https://threejs.org/examples/jsm/",
+          "cannon-es": "https://cdn.skypack.dev/cannon-es"
         }
+      }
     </script>
 
+    <style>
+      body { margin:0; overflow:hidden; }
+      canvas { display:block; }
+      #powerHud {
+        position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+        width:200px; height:12px; background:#555; border-radius:6px;
+        overflow:hidden; pointer-events:none;
+      }
+      #powerHud>div {
+        height:100%; width:0%; background:#0f0;
+      }
+    </style>
+
     <script type="module">
-        import * as THREE from 'three';
-        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+    import * as THREE from 'three';
+    import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+    import * as CANNON from 'cannon-es';
 
-        // Configuração básica da cena
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+    /* ---------------------------------------------------------
+       THREE BASICS
+    --------------------------------------------------------- */
+    const scene    = new THREE.Scene();
+    scene.background = new THREE.Color(0xaaaaaa);
 
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
-        document.body.appendChild(renderer.domElement);
+    const camera   = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
 
-        // Adicionar controle de cursor bloqueado
-        const controls = new PointerLockControls(camera, document.body);
+    /* ---------------------------------------------------------
+       POINTER‑LOCK (FPS) CONTROLS
+    --------------------------------------------------------- */
+    const controls = new PointerLockControls(camera, document.body);
+    document.addEventListener('click', () => controls.lock());
 
-        // Evento para ativar o controle ao clicar na tela
-        document.addEventListener('click', () => {
-            controls.lock();
-        });
+    /* ---------------------------------------------------------
+       PHYSICS WORLD (Cannon‑ES)
+    --------------------------------------------------------- */
+    const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
+    world.broadphase  = new CANNON.SAPBroadphase(world);
+    world.allowSleep  = true;
+    world.solver.iterations = 15;
 
-        let velocityY = 0;        // Velocidade vertical
-        const gravity = -0.02;    // Gravidade aplicada ao jogador
-        const jumpStrength = 0.3; // Força do salto
-        const groundLevel = 2;    // Altura fixa do solo
+    // Materials & contact
+    const feltMat  = new CANNON.Material('felt');
+    const ballMat  = new CANNON.Material('ball');
+    const railMat  = new CANNON.Material('rail');
 
-        // Iluminação
-        const luz = new THREE.SpotLight(0xffffff, 200);
-        luz.position.set(0, 10, 0);
-        luz.castShadow = true;
-        scene.add(luz);
+    world.addContactMaterial(new CANNON.ContactMaterial(ballMat, ballMat, {
+        friction: 0.05,
+        restitution: 0.95
+    }));
+    world.addContactMaterial(new CANNON.ContactMaterial(ballMat, feltMat, {
+        friction: 0.25,
+        restitution: 0.93
+    }));
+    world.addContactMaterial(new CANNON.ContactMaterial(ballMat, railMat, {
+        friction: 0.1,
+        restitution: 0.92
+    }));
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-        scene.add(ambientLight);
+    /* ---------------------------------------------------------
+       LIGHTS
+    --------------------------------------------------------- */
+    const spot = new THREE.SpotLight(0xffffff, 100);
+    spot.position.set(0, 10, 0);
+    spot.castShadow = true;
+    scene.add(spot);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
-        // Fundo da cena
-        scene.background = new THREE.Color(0xaaaaaa);
+    /* ---------------------------------------------------------
+       WORLD HELPERS
+    --------------------------------------------------------- */
+    const physicsObjects = []; //  { mesh, body }
+    let   cueBody = null;      //  reference to white ball physics body
 
-        // Chão
-        const geometryChao = new THREE.PlaneGeometry(50, 50);
-        const materialChao = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.8 });
-        const chao = new THREE.Mesh(geometryChao, materialChao);
-        chao.rotation.x = -Math.PI / 2;
-        chao.receiveShadow = true;
-        scene.add(chao);
+    /* ---------------------------------------------------------
+       TABLE + CUSHIONS + STATIC BODIES
+    --------------------------------------------------------- */
+    addTable(0, 0);
 
-        // Mesa
-        addTable(0, 0)
+    function addTable(x, z) {
+      const tableGroup = new THREE.Group();
+      tableGroup.position.set(x, 0, z);
 
-        // Bolas
-        addBall(0xffffff, 0, 1, 0);
-        addBall(0xf0ff00, 0.5, 1, 0.4);
-        addBall(0x000000, 1, 1, 1)
-        addBall(0x0000ff, 2, 1, 1)
-        addBall(0x00ff00, 3, 1, 1)
+      // ----- felt (mesh) -----
+      const tableGeom   = new THREE.BoxGeometry(10, 0.2, 5);
+      const tableMat    = new THREE.MeshStandardMaterial({ color: 0x006600, roughness:0.4 });
+      const tableMesh   = new THREE.Mesh(tableGeom, tableMat);
+      tableMesh.position.set(0, 0.8, 0);
+      tableMesh.receiveShadow = true;
+      tableGroup.add(tableMesh);
 
-        //Paredes
-        addWall(30, 5, 5, 6, 0); //Parede Direita
-        addWall(20, -9, -5, 6, 90); //Parede Fundo
-        addWall(30, 6, -15, 6, 0); //Parede Esquerda
-        addWall(20, 20, -5, 6, 90); //Parede Bar
-        addWall(10, 9, 0, 1, 90); //Mini Parede
+      // ----- felt (physics plane) -----
+      const feltBody = new CANNON.Body({ mass:0, material:feltMat });
+      feltBody.addShape(new CANNON.Plane());
+      feltBody.position.set(x, 0.9, z);               // top surface
+      feltBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
+      world.addBody(feltBody);
 
+      // ----- legs ----- (visual only)
+      const legGeom = new THREE.CylinderGeometry(0.1, 0.1, 0.75, 16);
+      const legMat  = new THREE.MeshStandardMaterial({ color: 0x552200 });
+      [[-4.5,0.375,-2],[4.5,0.375,-2],[-4.5,0.375,2],[4.5,0.375,2]].forEach(([lx,ly,lz])=>{
+          const m=new THREE.Mesh(legGeom,legMat); m.position.set(lx,ly,lz); m.castShadow=true; tableGroup.add(m);
+      });
 
-        // Definir posição inicial da câmara
-        camera.position.set(0, 2, 5);
+      // ----- cushions (visual + physics) -----
+      const cushionHeight     = 0.2;
+      const cushionThickness  = 0.3;
+      const cushionMatVisual  = new THREE.MeshStandardMaterial({ color: 0x333333, roughness:0.5 });
 
-        // Configuração para movimento FPS
-        const keys = { w: false, a: false, s: false, d: false };
-        const speed = 0.1;
+      // long rails (east/west)
+      [{z:  2.5 + cushionThickness/2}, {z: -2.5 - cushionThickness/2}].forEach(({z:zz})=>{
+        const cush = new THREE.Mesh(new THREE.BoxGeometry(10, cushionHeight, cushionThickness), cushionMatVisual);
+        cush.position.set(0, 0.9 + cushionHeight/2, zz);
+        cush.receiveShadow = true;
+        tableGroup.add(cush);
 
-        document.addEventListener('keydown', (event) => {
-            if (keys.hasOwnProperty(event.key.toLowerCase())) {
-                keys[event.key.toLowerCase()] = true;
-            }
-        });
+        const body = new CANNON.Body({ mass:0, material:railMat });
+        body.addShape(new CANNON.Box(new CANNON.Vec3(5, cushionHeight/2, cushionThickness/2)));
+        body.position.set(x, 0.9 + cushionHeight/2, z + zz);
+        world.addBody(body);
+      });
 
-        document.addEventListener('keyup', (event) => {
-            if (keys.hasOwnProperty(event.key.toLowerCase())) {
-                keys[event.key.toLowerCase()] = false;
-            }
-        });
+      // short rails (north/south)
+      [{x: -5 - cushionThickness/2},{x: 5 + cushionThickness/2}].forEach(({x:xx})=>{
+        const cush = new THREE.Mesh(new THREE.BoxGeometry(cushionThickness, cushionHeight, 5 + 2*cushionThickness), cushionMatVisual);
+        cush.position.set(xx, 0.9 + cushionHeight/2, 0);
+        cush.receiveShadow = true;
+        tableGroup.add(cush);
 
-        document.addEventListener('keydown', (event) => {
-            if (event.code === 'Space' && camera.position.y <= groundLevel) {
-                velocityY = jumpStrength;
-            }
-        });
+        const body = new CANNON.Body({ mass:0, material:railMat });
+        body.addShape(new CANNON.Box(new CANNON.Vec3(cushionThickness/2, cushionHeight/2, (5+2*cushionThickness)/2)));
+        body.position.set(x + xx, 0.9 + cushionHeight/2, z);
+        world.addBody(body);
+      });
 
-        function addTable(x, z) {
-            const tableGroup = new THREE.Group();
+      scene.add(tableGroup);
+    }
 
-            // Criar mesa
-            const geometryTable = new THREE.BoxGeometry(10, 0.2, 5);
-            const materialTable = new THREE.MeshStandardMaterial({ color: 0x006600, roughness: 0.4, metalness: 0.1 });
-            const table = new THREE.Mesh(geometryTable, materialTable);
-            table.position.set(0, 0.8, 0);
-            table.receiveShadow = true;
-            tableGroup.add(table);
+    /* ---------------------------------------------------------
+       GROUND & ROOM (visual only)
+    --------------------------------------------------------- */
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(50,50), new THREE.MeshStandardMaterial({ color:0x888888 }));
+    ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; scene.add(ground);
 
-            // Criar pernas da mesa
-            const geometryLeg = new THREE.CylinderGeometry(0.1, 0.1, 0.75, 16);
-            const materialLeg = new THREE.MeshStandardMaterial({ color: 0x552200 });
-            const legPositions = [
-                [-4.5, 0.375, -2], [4.5, 0.375, -2],
-                [-4.5, 0.375, 2],  [4.5, 0.375, 2]
-            ];
-            legPositions.forEach(pos => {
-                const leg = new THREE.Mesh(geometryLeg, materialLeg);
-                leg.castShadow = true;
-                leg.position.set(pos[0], pos[1], pos[2]);
-                tableGroup.add(leg);
-            });
+    // Simple walls (visual)
+    addWall(30, 5, 5, 6, 0);   // right
+    addWall(20,-9,-5, 6, 90);  // far
+    addWall(30, 6,-15,6, 0);   // left
+    addWall(20,20,-5, 6, 90);  // bar
+    addWall(10, 9, 0, 1, 90);  // small divider
 
-            // **Cushions**
-            const cushionHeight = 0.2;
-            const cushionThickness = 0.3;
-            const cushionMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.5 });
+    function addWall(size,x,z,height,orientation){
+      const w = new THREE.Mesh(new THREE.BoxGeometry(size,height,0.5), new THREE.MeshStandardMaterial({ color:0x552200 }));
+      w.position.set(x, height/2, z);
+      if(orientation===90) w.rotation.y = Math.PI/2;
+      w.receiveShadow = true; scene.add(w);
+    }
 
-            // Long cushions (ao longo do eixo X)
-            const geometryCushionLong = new THREE.BoxGeometry(10, cushionHeight, cushionThickness);
-            const cushionLongTop = new THREE.Mesh(geometryCushionLong, cushionMaterial);
-            cushionLongTop.position.set(0, 0.9 + cushionHeight / 2, 2.5 + cushionThickness / 2);
-            cushionLongTop.receiveShadow = true;
-            tableGroup.add(cushionLongTop);
+    /* ---------------------------------------------------------
+       BALLS (mesh + physics) –  First one is cue ball
+    --------------------------------------------------------- */
+    addBall(0xffffff, 0, 1, 0);      // cue
+    addBall(0xf0ff00, 0.5, 1, 0.4);
+    addBall(0x000000, 1, 1, 1);
+    addBall(0x0000ff, 2, 1, 1);
+    addBall(0x00ff00, 3, 1, 1);
 
-            const cushionLongBottom = cushionLongTop.clone();
-            cushionLongBottom.position.set(0, 0.9 + cushionHeight / 2, -2.5 - cushionThickness / 2);
-            tableGroup.add(cushionLongBottom);
+    function addBall(color,x,y,z){
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.1,32,32), new THREE.MeshStandardMaterial({ color, roughness:0.2 }));
+      mesh.castShadow = true; mesh.position.set(x,y,z); scene.add(mesh);
 
-            // Short cushions (ao longo do eixo Z)
-            const geometryCushionShort = new THREE.BoxGeometry(cushionThickness, cushionHeight, 5 + 2 * cushionThickness);
-            const cushionShortLeft = new THREE.Mesh(geometryCushionShort, cushionMaterial);
-            cushionShortLeft.position.set(-5 - cushionThickness / 2, 0.9 + cushionHeight / 2, 0);
-            cushionShortLeft.receiveShadow = true;
-            tableGroup.add(cushionShortLeft);
+      const body = new CANNON.Body({ mass: 0.17, shape: new CANNON.Sphere(0.1), material: ballMat });
+      body.position.set(x,y,z);
+      body.linearDamping = 0.2;   // stops after rolling
+      world.addBody(body);
 
-            const cushionShortRight = cushionShortLeft.clone();
-            cushionShortRight.position.set(5 + cushionThickness / 2, 0.9 + cushionHeight / 2, 0);
-            tableGroup.add(cushionShortRight);
+      physicsObjects.push({ mesh, body });
+      if(color === 0xffffff && !cueBody) cueBody = body;
+    }
 
-            // Definir posição do grupo e adicionar à cena
-            tableGroup.position.set(x, 0, z);
-            scene.add(tableGroup);
-        }
+    /* ---------------------------------------------------------
+       CAMERA START & MOVEMENT
+    --------------------------------------------------------- */
+    camera.position.set(0,2,5);
+    const keys = { w:false, a:false, s:false, d:false };
+    const speed = 0.1;
+    let velocityY = 0;
+    const gravityPlayer = -0.02;
+    const groundLevel   = 2;
 
+    window.addEventListener('keydown', e => { if(keys.hasOwnProperty(e.key)) keys[e.key]=true; });
+    window.addEventListener('keyup',   e => { if(keys.hasOwnProperty(e.key)) keys[e.key]=false; });
+    window.addEventListener('keydown', e => { if(e.code==='Space' && camera.position.y<=groundLevel) velocityY=0.3; });
 
-        function addWall(size, x, z, height, orientation) {
-            // Criar geometria da parede
-            const wallGeometry = new THREE.BoxGeometry(size, height, 0.5); // Largura definida por 'size', altura fixa em 3, espessura 0.5
-            const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x552200, roughness: 0.6 });
+    function updateCameraPosition(){
+      if(!controls.isLocked) return;
+      const dir = new THREE.Vector3(); camera.getWorldDirection(dir); dir.y=0; dir.normalize();
+      const right = new THREE.Vector3(); right.crossVectors(camera.up, dir).normalize();
+      if(keys.w) camera.position.addScaledVector(dir,  speed);
+      if(keys.s) camera.position.addScaledVector(dir, -speed);
+      if(keys.a) camera.position.addScaledVector(right,  speed);
+      if(keys.d) camera.position.addScaledVector(right, -speed);
+      velocityY += gravityPlayer; camera.position.y += velocityY;
+      if(camera.position.y<=groundLevel){ camera.position.y=groundLevel; velocityY=0; }
+    }
 
-            // Criar a parede
-            const wall = new THREE.Mesh(wallGeometry, wallMaterial);
-            wall.position.set(x, height/2, z); // Mantém a altura fixa no solo
-            wall.receiveShadow = true;
+    /* ---------------------------------------------------------
+       CUE ACTION –  Hold right‑mouse to build power, release to strike
+    --------------------------------------------------------- */
+    const hud = document.createElement('div'); hud.id='powerHud'; hud.innerHTML='<div></div>'; document.body.appendChild(hud);
+    const bar = hud.firstElementChild;
 
-            // Aplicar rotação se for perpendicular (90 graus)
-            if (orientation == 90) {
-                wall.rotation.y = Math.PI / 2; // Rotaciona a parede para ficar perpendicular
-            }
+    let powerStart = null;
+    window.addEventListener('contextmenu', e => e.preventDefault()); // disable menu
 
-            // Adicionar à cena
-            scene.add(wall);
-        }
+    window.addEventListener('mousedown', e => {
+      if(e.button===2 && controls.isLocked){ // right button
+        powerStart = performance.now();
+      }
+    });
+    window.addEventListener('mouseup', e => {
+      if(e.button===2 && powerStart!==null && cueBody){
+        const duration = (performance.now() - powerStart) / 1000; // seconds
+        const power    = Math.min(duration, 1.5);                 // cap at 1.5 s
+        const aimDir   = new THREE.Vector3(); camera.getWorldDirection(aimDir); aimDir.y = 0; aimDir.normalize();
+        const impulse  = new CANNON.Vec3(-aimDir.x * power * 4, 0, -aimDir.z * power * 4);
+        cueBody.applyImpulse(impulse, cueBody.position);
+        powerStart = null; bar.style.width = '0%';
+      }
+    });
 
-        function addBall(color, x, y, z) {
-            const geometryBola = new THREE.SphereGeometry(0.1, 32, 32);
-            const materialBola = new THREE.MeshStandardMaterial({ color: color, roughness: 0.2, metalness: 0 });
-            const bola = new THREE.Mesh(geometryBola, materialBola);
-            bola.castShadow = true;
-            bola.position.set(x, y, z);
-            scene.add(bola);
-        }
+    // Power HUD update
+    function updateHud(){
+      if(powerStart!==null){
+        const pct = Math.min((performance.now()-powerStart)/1500,1)*100;
+        bar.style.width = pct+'%';
+      }
+    }
 
-        function updateCameraPosition() {
-            if (controls.isLocked) {
-                const direction = new THREE.Vector3();
-                camera.getWorldDirection(direction);
-                direction.y = 0;
-                direction.normalize();
+    /* ---------------------------------------------------------
+       RENDER / PHYSICS LOOP
+    --------------------------------------------------------- */
+    const fixedTimeStep = 1/120; // 120 Hz
+    let   lastTime;
+    function animate(time){
+      requestAnimationFrame(animate);
+      if(lastTime!==undefined){
+        world.step(fixedTimeStep, (time-lastTime)/1000);
+      }
+      physicsObjects.forEach(o=>{
+        o.mesh.position.copy(o.body.position);
+        o.mesh.quaternion.set(o.body.quaternion.x, o.body.quaternion.y, o.body.quaternion.z, o.body.quaternion.w);
+      });
+      updateCameraPosition();
+      updateHud();
+      renderer.render(scene, camera);
+      lastTime = time;
+    }
+    animate();
 
-                const right = new THREE.Vector3();
-                right.crossVectors(camera.up, direction).normalize();
+    /* ---------------------------------------------------------
+       RESIZE
+    --------------------------------------------------------- */
+    window.addEventListener('resize', ()=>{
+      camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
 
-                if (keys.w) camera.position.addScaledVector(direction, speed);
-                if (keys.s) camera.position.addScaledVector(direction, -speed);
-                if (keys.d) camera.position.addScaledVector(right, -speed);
-                if (keys.a) camera.position.addScaledVector(right, speed);
-
-                velocityY += gravity;
-                camera.position.y += velocityY;
-
-                if (camera.position.y <= groundLevel) {
-                    camera.position.y = groundLevel;
-                    velocityY = 0;
-                }
-            }
-        }
-
-        function animate() {
-            requestAnimationFrame(animate);
-            updateCameraPosition();
-            renderer.render(scene, camera);
-        }
-
-        animate();
     </script>
 </head>
 <body>
-    <div id="Tag3DScene"></div>
 </body>
 </html>
