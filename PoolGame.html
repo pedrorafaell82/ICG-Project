@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>PoolGame – Physics Edition</title>
+    <title>PoolGame</title>
     <link rel="stylesheet" href="style.css">
 
     <!-- Three.js, examples + Cannon‑ES via modern import‑map -->
@@ -71,8 +71,10 @@
         restitution: 0.95
     }));
     world.addContactMaterial(new CANNON.ContactMaterial(ballMat, feltMat, {
-        friction: 0.25,
-        restitution: 0.93
+      friction:     0.60,   // higher kinetic friction
+      restitution:  0.85,   // a touch less bounce
+      contactEquationStiffness: 1e7,
+      contactEquationRelaxation:  3
     }));
     world.addContactMaterial(new CANNON.ContactMaterial(ballMat, railMat, {
         friction: 0.1,
@@ -95,6 +97,11 @@
     let   cueBody = null;      //  reference to white ball physics body
     const obstacles = [];
     const initialBallStates = [];
+
+    // POCKETS --------------------------------------------------
+    const pocketCenters = [];          // world-space centres of the six holes
+    const pocketRadius  = 0.18;        // > ball radius (0.10) so they’ll be swallowed
+    const ballRadius    = 0.10;
 
     /* ---------------------------------------------------------
        TABLE + CUSHIONS + STATIC BODIES
@@ -158,6 +165,25 @@
         world.addBody(body);
       });
 
+        /* ---------- POCKETS (visual only) ---------- */
+      const pocketLocal = [
+        [-5, -2.5], [-5,  2.5],   // corners left
+        [ 5, -2.5], [ 5,  2.5],   // corners right
+        [ 0, -2.5], [ 0,  2.5]    // middles
+      ];
+      pocketLocal.forEach(([px, pz])=>{
+        const hole = new THREE.Mesh(
+          new THREE.CylinderGeometry(pocketRadius, pocketRadius, 0.25, 32),
+          new THREE.MeshStandardMaterial({ color:0x000000 })
+        );
+        hole.rotation.x = -Math.PI/2;
+        hole.position.set(px, 0.805, pz);      // just below felt
+        tableGroup.add(hole);
+
+        // store world-space centre for pocket tests
+        pocketCenters.push(new THREE.Vector3(x + px, 0.9, z + pz));
+      });
+
       scene.add(tableGroup);
       obstacles.push({ minX:x-5.5, maxX:x+5.5, minZ:z-2.8, maxZ:z+2.8 });
     }
@@ -192,7 +218,6 @@
         body.addShape(new CANNON.Box(
           new CANNON.Vec3(thickness / 2, height / 2, size / 2)
         ));
-        body.quaternion.setFromEuler(0, Math.PI / 2, 0);
       } else {                                         // east–west wall
         body.addShape(new CANNON.Box(
           new CANNON.Vec3(size / 2, height / 2, thickness / 2)
@@ -224,12 +249,14 @@
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.1,32,32), new THREE.MeshStandardMaterial({ color, roughness:0.2 }));
       mesh.castShadow = true; mesh.position.set(x,y,z); scene.add(mesh);
 
-      const body = new CANNON.Body({ mass: 0.17, shape: new CANNON.Sphere(0.1), material: ballMat });
+      const body = new CANNON.Body({ mass: 0.5, shape: new CANNON.Sphere(ballRadius), material: ballMat });
+      
       body.position.set(x,y,z);
-      body.linearDamping = 0.2;   // stops after rolling
+      body.linearDamping  = 0.30;   // tweak 0.25-0.35 to taste
+      body.angularDamping = 0.30;   // NEW – slows spin
       world.addBody(body);
 
-      physicsObjects.push({ mesh, body });
+      physicsObjects.push({ mesh, body, pocketed:false });
       initialBallStates.push({ body, mesh, pos: new THREE.Vector3(x, y, z) });
       if(color === 0xffffff && !cueBody) cueBody = body;
     }
@@ -246,10 +273,11 @@
       const apexX =  3.5;                  // triangle sits near +X cushion
       let colIdx = 0;
 
-      for(let row=0; row<5; row++){        // 5-4-3-2-1 = 15 balls
-        for(let n=0; n<5-row; n++){
-          const x = apexX + row*d;
-          const z = (-(5-row-1)/2 + n) * d;
+      for (let row = 0; row < 5; row++) {          // 1-2-3-4-5 = 15 balls
+        const ballsThisRow = row + 1;              // grow each row
+        for (let n = 0; n < ballsThisRow; n++) {
+          const x = apexX + row * d;               // push each row farther down-table
+          const z = (-row / 2 + n) * d;            // centre the row on z-axis
           addBall(ballColors[colIdx++], x, 1, z);
         }
       }
@@ -273,14 +301,18 @@
     window.addEventListener('keydown', e => { if(e.code==='Space' && camera.position.y<=groundLevel) velocityY=0.3; });
     window.addEventListener('keydown', e=>{
       if(e.code === 'KeyR'){
-        initialBallStates.forEach(s=>{
-          s.body.position.set(s.pos.x, s.pos.y, s.pos.z);
-          s.body.velocity.set(0,0,0);
-          s.body.angularVelocity.set(0,0,0);
-          s.body.quaternion.set(0,0,0,1);
-          s.mesh.position.copy(s.pos);
-          s.mesh.quaternion.set(0,0,0,1);
-        });
+        for(let i=0; i<physicsObjects.length; i++){
+          const o = physicsObjects[i];
+          const s = initialBallStates[i];
+          o.body.position.set(s.pos.x, s.pos.y, s.pos.z);
+          o.body.velocity.set(0,0,0);
+          o.body.angularVelocity.set(0,0,0);
+          o.body.quaternion.set(0,0,0,1);
+          o.mesh.position.copy(s.pos);
+          o.mesh.quaternion.set(0,0,0,1);
+          o.mesh.visible = true;
+          o.pocketed = false;          // NEW – revive the ball
+        }
       }
     });
 
@@ -348,6 +380,24 @@
       if(lastTime!==undefined){
         world.step(fixedTimeStep, (time-lastTime)/1000);
       }
+      const triggerR2 = (pocketRadius - ballRadius * 0.15) ** 2;   // a bit of margin
+      physicsObjects.forEach(o=>{
+        if(o.pocketed) return;
+        for(const c of pocketCenters){
+          const dx = o.body.position.x - c.x;
+          const dz = o.body.position.z - c.z;
+          if(dx*dx + dz*dz < triggerR2){       // ←- only XY distance matters
+            o.pocketed = true;
+
+            o.mesh.visible = false;            // vanish above the felt
+            o.body.velocity.set(0,0,0);
+            o.body.angularVelocity.set(0,0,0);
+            o.body.position.set(c.x, -1, c.z); // stash out of sight
+            break;
+          }
+        }
+      });
+
       physicsObjects.forEach(o=>{
         o.mesh.position.copy(o.body.position);
         o.mesh.quaternion.set(o.body.quaternion.x, o.body.quaternion.y, o.body.quaternion.z, o.body.quaternion.w);
