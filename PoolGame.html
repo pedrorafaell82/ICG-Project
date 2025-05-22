@@ -93,6 +93,8 @@
     --------------------------------------------------------- */
     const physicsObjects = []; //  { mesh, body }
     let   cueBody = null;      //  reference to white ball physics body
+    const obstacles = [];
+    const initialBallStates = [];
 
     /* ---------------------------------------------------------
        TABLE + CUSHIONS + STATIC BODIES
@@ -157,6 +159,7 @@
       });
 
       scene.add(tableGroup);
+      obstacles.push({ minX:x-5.5, maxX:x+5.5, minZ:z-2.8, maxZ:z+2.8 });
     }
 
     /* ---------------------------------------------------------
@@ -172,21 +175,50 @@
     addWall(20,20,-5, 6, 90);  // bar
     addWall(10, 9, 0, 1, 90);  // small divider
 
-    function addWall(size,x,z,height,orientation){
-      const w = new THREE.Mesh(new THREE.BoxGeometry(size,height,0.5), new THREE.MeshStandardMaterial({ color:0x552200 }));
-      w.position.set(x, height/2, z);
-      if(orientation===90) w.rotation.y = Math.PI/2;
-      w.receiveShadow = true; scene.add(w);
+    function addWall(size, x, z, height, orientation){
+      const thickness = 0.5;                          // depth of the wall box
+      const wallMesh  = new THREE.Mesh(
+        new THREE.BoxGeometry(size, height, thickness),
+        new THREE.MeshStandardMaterial({ color: 0x552200 })
+      );
+      wallMesh.position.set(x, height / 2, z);
+      if (orientation === 90) wallMesh.rotation.y = Math.PI / 2;
+      wallMesh.receiveShadow = true;
+      scene.add(wallMesh);
+
+      /* ---------- physics body so the BALLS bounce off ---------- */
+      const body = new CANNON.Body({ mass: 0, material: railMat });
+      if (orientation === 90){                         // north–south wall
+        body.addShape(new CANNON.Box(
+          new CANNON.Vec3(thickness / 2, height / 2, size / 2)
+        ));
+        body.quaternion.setFromEuler(0, Math.PI / 2, 0);
+      } else {                                         // east–west wall
+        body.addShape(new CANNON.Box(
+          new CANNON.Vec3(size / 2, height / 2, thickness / 2)
+        ));
+      }
+      body.position.set(x, height / 2, z);
+      world.addBody(body);
+
+      /* ---------- AABB so the PLAYER camera can’t walk through ---------- */
+      obstacles.push({
+        minX: x - (orientation === 90 ? thickness / 2 : size / 2),
+        maxX: x + (orientation === 90 ? thickness / 2 : size / 2),
+        minZ: z - (orientation === 90 ? size / 2 : thickness / 2),
+        maxZ: z + (orientation === 90 ? size / 2 : thickness / 2)
+      });
     }
+
 
     /* ---------------------------------------------------------
        BALLS (mesh + physics) –  First one is cue ball
     --------------------------------------------------------- */
-    addBall(0xffffff, 0, 1, 0);      // cue
-    addBall(0xf0ff00, 0.5, 1, 0.4);
-    addBall(0x000000, 1, 1, 1);
-    addBall(0x0000ff, 2, 1, 1);
-    addBall(0x00ff00, 3, 1, 1);
+    //addBall(0xffffff, 0, 1, 0);      // cue
+    //addBall(0xf0ff00, 0.5, 1, 0.4);
+    //addBall(0x000000, 1, 1, 1);
+    //addBall(0x0000ff, 2, 1, 1);
+    //addBall(0x00ff00, 3, 1, 1);
 
     function addBall(color,x,y,z){
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.1,32,32), new THREE.MeshStandardMaterial({ color, roughness:0.2 }));
@@ -198,13 +230,38 @@
       world.addBody(body);
 
       physicsObjects.push({ mesh, body });
+      initialBallStates.push({ body, mesh, pos: new THREE.Vector3(x, y, z) });
       if(color === 0xffffff && !cueBody) cueBody = body;
     }
+
+    const ballColors = [          // quick palette, 15 distinct tints
+      0xff0000, 0xffff00, 0x0000ff, 0x00ff00, 0xff8800,
+      0x5500ff, 0xff00ff, 0x000000, 0xcc2222, 0xcccc00,
+      0x2222cc, 0x22cc22, 0xffaa55, 0x8855ff, 0xff55ff
+    ];
+
+    (function placeInitialRack(){
+      const r   = 0.1, gap = 0.005;
+      const d   = 2*r + gap;               // centre-to-centre spacing
+      const apexX =  3.5;                  // triangle sits near +X cushion
+      let colIdx = 0;
+
+      for(let row=0; row<5; row++){        // 5-4-3-2-1 = 15 balls
+        for(let n=0; n<5-row; n++){
+          const x = apexX + row*d;
+          const z = (-(5-row-1)/2 + n) * d;
+          addBall(ballColors[colIdx++], x, 1, z);
+        }
+      }
+
+      // white cue ball at the other end of the table
+      addBall(0xffffff, -4, 1, 0);
+    })();
 
     /* ---------------------------------------------------------
        CAMERA START & MOVEMENT
     --------------------------------------------------------- */
-    camera.position.set(0,2,5);
+    camera.position.set(-8,2,0);
     const keys = { w:false, a:false, s:false, d:false };
     const speed = 0.1;
     let velocityY = 0;
@@ -214,9 +271,22 @@
     window.addEventListener('keydown', e => { if(keys.hasOwnProperty(e.key)) keys[e.key]=true; });
     window.addEventListener('keyup',   e => { if(keys.hasOwnProperty(e.key)) keys[e.key]=false; });
     window.addEventListener('keydown', e => { if(e.code==='Space' && camera.position.y<=groundLevel) velocityY=0.3; });
+    window.addEventListener('keydown', e=>{
+      if(e.code === 'KeyR'){
+        initialBallStates.forEach(s=>{
+          s.body.position.set(s.pos.x, s.pos.y, s.pos.z);
+          s.body.velocity.set(0,0,0);
+          s.body.angularVelocity.set(0,0,0);
+          s.body.quaternion.set(0,0,0,1);
+          s.mesh.position.copy(s.pos);
+          s.mesh.quaternion.set(0,0,0,1);
+        });
+      }
+    });
 
     function updateCameraPosition(){
       if(!controls.isLocked) return;
+      const prevX = camera.position.x, prevZ = camera.position.z;
       const dir = new THREE.Vector3(); camera.getWorldDirection(dir); dir.y=0; dir.normalize();
       const right = new THREE.Vector3(); right.crossVectors(camera.up, dir).normalize();
       if(keys.w) camera.position.addScaledVector(dir,  speed);
@@ -225,6 +295,14 @@
       if(keys.d) camera.position.addScaledVector(right, -speed);
       velocityY += gravityPlayer; camera.position.y += velocityY;
       if(camera.position.y<=groundLevel){ camera.position.y=groundLevel; velocityY=0; }
+      obstacles.forEach(o=>{
+        const pad = 0.3; // player “radius”
+        if(camera.position.x > o.minX - pad && camera.position.x < o.maxX + pad &&
+          camera.position.z > o.minZ - pad && camera.position.z < o.maxZ + pad){
+            camera.position.x = prevX;
+            camera.position.z = prevZ;
+        }
+      });
     }
 
     /* ---------------------------------------------------------
@@ -246,7 +324,7 @@
         const duration = (performance.now() - powerStart) / 1000; // seconds
         const power    = Math.min(duration, 1.5);                 // cap at 1.5 s
         const aimDir   = new THREE.Vector3(); camera.getWorldDirection(aimDir); aimDir.y = 0; aimDir.normalize();
-        const impulse  = new CANNON.Vec3(-aimDir.x * power * 4, 0, -aimDir.z * power * 4);
+        const impulse  = new CANNON.Vec3(aimDir.x * power * 4, 0, aimDir.z * power * 4);
         cueBody.applyImpulse(impulse, cueBody.position);
         powerStart = null; bar.style.width = '0%';
       }
