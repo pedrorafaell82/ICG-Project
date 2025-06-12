@@ -47,6 +47,41 @@
     renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
+    const raycaster = new THREE.Raycaster();
+    const aimDir    = new THREE.Vector3();
+
+    let cueMesh = null;                     
+    const aimLineMat  = new THREE.LineDashedMaterial({
+      color: 0xffff00, transparent: true, opacity: 0.6,
+      dashSize: 0.20, gapSize: 0.10
+    });
+    const aimLineGeom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(), new THREE.Vector3()
+    ]);
+    const aimLine     = new THREE.Line(aimLineGeom, aimLineMat);
+    aimLine.computeLineDistances();
+    aimLine.visible = false;
+    scene.add(aimLine);
+
+    /* ---------------------------------------------------------
+        TEXTURES
+    --------------------------------------------------------- */
+    const feltTex = new THREE.TextureLoader().load('./textures/felt.png', t => {
+      t.colorSpace = THREE.SRGBColorSpace;         
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;    
+      t.repeat.set(2, 1);                          
+      t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    });
+
+    const ballTextures = [];
+    for (let i = 1; i <= 15; i++) {
+      const tex = new THREE.TextureLoader().load(`./textures/${i}ball.png`, t=>{
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      });
+      ballTextures[i] = tex;
+    }
+
     /* ---------------------------------------------------------
        POINTER‑LOCK (FPS) CONTROLS
     --------------------------------------------------------- */
@@ -61,7 +96,6 @@
     world.allowSleep  = true;
     world.solver.iterations = 15;
 
-    // Materials & contact
     const feltMat  = new CANNON.Material('felt');
     const ballMat  = new CANNON.Material('ball');
     const railMat  = new CANNON.Material('rail');
@@ -71,8 +105,8 @@
         restitution: 0.95
     }));
     world.addContactMaterial(new CANNON.ContactMaterial(ballMat, feltMat, {
-      friction:     0.60,   // higher kinetic friction
-      restitution:  0.85,   // a touch less bounce
+      friction:     0.60,   
+      restitution:  0.85,   
       contactEquationStiffness: 1e7,
       contactEquationRelaxation:  3
     }));
@@ -84,23 +118,28 @@
     /* ---------------------------------------------------------
        LIGHTS
     --------------------------------------------------------- */
-    const spot = new THREE.SpotLight(0xffffff, 100);
+    const spot = new THREE.SpotLight(0xffffff, 20);
     spot.position.set(0, 10, 0);
     spot.castShadow = true;
     scene.add(spot);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+
+    let rgbMode = false;                              
+    const switchMatOff = new THREE.MeshStandardMaterial({ color: 0x999999 });
+    const switchMatOn  = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
+    let  lightSwitch;                                 
 
     /* ---------------------------------------------------------
        WORLD HELPERS
     --------------------------------------------------------- */
-    const physicsObjects = []; //  { mesh, body }
-    let   cueBody = null;      //  reference to white ball physics body
+    const physicsObjects = []; 
+    let   cueBody = null;      
     const obstacles = [];
     const initialBallStates = [];
 
     // POCKETS --------------------------------------------------
-    const pocketCenters = [];          // world-space centres of the six holes
-    const pocketRadius  = 0.18;        // > ball radius (0.10) so they’ll be swallowed
+    const pocketCenters = [];          
+    const pocketRadius  = 0.18;        
     const ballRadius    = 0.10;
 
     /* ---------------------------------------------------------
@@ -112,34 +151,30 @@
       const tableGroup = new THREE.Group();
       tableGroup.position.set(x, 0, z);
 
-      // ----- felt (mesh) -----
       const tableGeom   = new THREE.BoxGeometry(10, 0.2, 5);
-      const tableMat    = new THREE.MeshStandardMaterial({ color: 0x006600, roughness:0.4 });
+      const tableMat = new THREE.MeshStandardMaterial({map: feltTex, roughness: 0.6, metalness: 0.0});
       const tableMesh   = new THREE.Mesh(tableGeom, tableMat);
       tableMesh.position.set(0, 0.8, 0);
       tableMesh.receiveShadow = true;
+      tableMesh.castShadow    = true;
       tableGroup.add(tableMesh);
 
-      // ----- felt (physics plane) -----
       const feltBody = new CANNON.Body({ mass:0, material:feltMat });
       feltBody.addShape(new CANNON.Plane());
-      feltBody.position.set(x, 0.9, z);               // top surface
+      feltBody.position.set(x, 0.9, z);               
       feltBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
       world.addBody(feltBody);
 
-      // ----- legs ----- (visual only)
       const legGeom = new THREE.CylinderGeometry(0.1, 0.1, 0.75, 16);
       const legMat  = new THREE.MeshStandardMaterial({ color: 0x552200 });
       [[-4.5,0.375,-2],[4.5,0.375,-2],[-4.5,0.375,2],[4.5,0.375,2]].forEach(([lx,ly,lz])=>{
           const m=new THREE.Mesh(legGeom,legMat); m.position.set(lx,ly,lz); m.castShadow=true; tableGroup.add(m);
       });
 
-      // ----- cushions (visual + physics) -----
       const cushionHeight     = 0.2;
       const cushionThickness  = 0.3;
       const cushionMatVisual  = new THREE.MeshStandardMaterial({ color: 0x333333, roughness:0.5 });
 
-      // long rails (east/west)
       [{z:  2.5 + cushionThickness/2}, {z: -2.5 - cushionThickness/2}].forEach(({z:zz})=>{
         const cush = new THREE.Mesh(new THREE.BoxGeometry(10, cushionHeight, cushionThickness), cushionMatVisual);
         cush.position.set(0, 0.9 + cushionHeight/2, zz);
@@ -152,7 +187,6 @@
         world.addBody(body);
       });
 
-      // short rails (north/south)
       [{x: -5 - cushionThickness/2},{x: 5 + cushionThickness/2}].forEach(({x:xx})=>{
         const cush = new THREE.Mesh(new THREE.BoxGeometry(cushionThickness, cushionHeight, 5 + 2*cushionThickness), cushionMatVisual);
         cush.position.set(xx, 0.9 + cushionHeight/2, 0);
@@ -165,11 +199,10 @@
         world.addBody(body);
       });
 
-        /* ---------- POCKETS (visual only) ---------- */
       const pocketLocal = [
-        [-5, -2.5], [-5,  2.5],   // corners left
-        [ 5, -2.5], [ 5,  2.5],   // corners right
-        [ 0, -2.5], [ 0,  2.5]    // middles
+        [-5, -2.5], [-5,  2.5],   
+        [ 5, -2.5], [ 5,  2.5],   
+        [ 0, -2.5], [ 0,  2.5]    
       ];
       pocketLocal.forEach(([px, pz])=>{
         const hole = new THREE.Mesh(
@@ -177,10 +210,9 @@
           new THREE.MeshStandardMaterial({ color:0x000000 })
         );
         hole.rotation.x = -Math.PI/2;
-        hole.position.set(px, 0.805, pz);      // just below felt
+        hole.position.set(px, 0.805, pz);     
         tableGroup.add(hole);
 
-        // store world-space centre for pocket tests
         pocketCenters.push(new THREE.Vector3(x + px, 0.9, z + pz));
       });
 
@@ -189,36 +221,103 @@
     }
 
     /* ---------------------------------------------------------
+      ROOF + SPOTLIGHTS
+    --------------------------------------------------------- */
+    const roofY = 6.2;
+    const roof = new THREE.Mesh(
+      new THREE.BoxGeometry(50, 0.2, 50),
+      new THREE.MeshStandardMaterial({ color: 0x444444, roughness:0.8 })
+    );
+    roof.position.y = roofY;
+    roof.receiveShadow = false;
+    scene.add(roof);
+
+    const rgbFixtures = [];                       
+
+    const roomMinX = -9,  roomMaxX =  20;         
+    const roomMinZ = -15, roomMaxZ =   5;
+    const margin   = 1;                        
+    const cols = 3, rows = 2;
+
+    for (let c = 0; c < cols; c++) {
+      for (let r = 0; r < rows; r++) {
+        const lx = THREE.MathUtils.lerp(roomMinX + margin, roomMaxX - margin, (c + 0.5) / cols);
+        const lz = THREE.MathUtils.lerp(roomMinZ + margin, roomMaxZ - margin, (r + 0.5) / rows);
+        const discMat = new THREE.MeshStandardMaterial({
+          emissive: 0xffffff, emissiveIntensity: 6, color: 0x222222
+        });
+        const disc = new THREE.Mesh(new THREE.CircleGeometry(0.35, 32), discMat);
+        disc.rotation.x = Math.PI / 2;
+        disc.position.set(lx, roofY - 0.11, lz);
+        scene.add(disc);
+
+        const spot = new THREE.SpotLight(0xffffff, 50, 0, Math.PI / 6, 0.65);
+        spot.position.set(lx, roofY - 0.1, lz);
+        spot.target.position.set(lx, 0.9, lz);
+        spot.castShadow = true;
+        spot.shadow.mapSize.set(1024, 1024);
+        scene.add(spot);
+        scene.add(spot.target);
+
+        rgbFixtures.push({ spot, discMat });
+      }
+    }
+
+    /* ---------------------------------------------------------
        GROUND & ROOM (visual only)
     --------------------------------------------------------- */
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(50,50), new THREE.MeshStandardMaterial({ color:0x888888 }));
+    const floorTex = new THREE.TextureLoader().load('./textures/floor.png', t => {
+      t.colorSpace = THREE.SRGBColorSpace;           
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;      
+      t.repeat.set(8, 8);                            
+      t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    });
+
+    const wallTex = new THREE.TextureLoader().load('./textures/wall.jpg', t => {
+      t.colorSpace = THREE.SRGBColorSpace;          
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;     
+      t.repeat.set(4, 2);                           
+      t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    });
+
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(50,50), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 }));
     ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; scene.add(ground);
 
-    // Simple walls (visual)
-    addWall(30, 5, 5, 6, 0);   // right
-    addWall(20,-9,-5, 6, 90);  // far
-    addWall(30, 6,-15,6, 0);   // left
-    addWall(20,20,-5, 6, 90);  // bar
-    addWall(10, 9, 0, 1, 90);  // small divider
+    addWall(30, 5, 5, 6, 0);  
+    addWall(20,-9,-5, 6, 90); 
+    addWall(30, 6,-15,6, 0);  
+    addWall(20,20,-5, 6, 90);  
+    addWall(10, 9, 0, 1, 90); 
+
+    (() => {
+      const btnGeo = new THREE.BoxGeometry(0.6, 0.6, 0.08);
+      btnGeo.translate(0, 0, -0.04);                 
+      const button = new THREE.Mesh(btnGeo, switchMatOff);
+      const wallX = roomMinX + 0.04;
+      const wallZ = roomMinZ + 1;   
+      button.position.set(wallX, 1.4, wallZ);
+      button.castShadow = true;
+      scene.add(button);
+      lightSwitch = button;
+    })();
 
     function addWall(size, x, z, height, orientation){
-      const thickness = 0.5;                          // depth of the wall box
+      const thickness = 0.5;                          
       const wallMesh  = new THREE.Mesh(
         new THREE.BoxGeometry(size, height, thickness),
-        new THREE.MeshStandardMaterial({ color: 0x552200 })
+        new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.9 })
       );
       wallMesh.position.set(x, height / 2, z);
       if (orientation === 90) wallMesh.rotation.y = Math.PI / 2;
       wallMesh.receiveShadow = true;
       scene.add(wallMesh);
 
-      /* ---------- physics body so the BALLS bounce off ---------- */
       const body = new CANNON.Body({ mass: 0, material: railMat });
-      if (orientation === 90){                         // north–south wall
+      if (orientation === 90){                         
         body.addShape(new CANNON.Box(
           new CANNON.Vec3(thickness / 2, height / 2, size / 2)
         ));
-      } else {                                         // east–west wall
+      } else {                                        
         body.addShape(new CANNON.Box(
           new CANNON.Vec3(size / 2, height / 2, thickness / 2)
         ));
@@ -226,7 +325,6 @@
       body.position.set(x, height / 2, z);
       world.addBody(body);
 
-      /* ---------- AABB so the PLAYER camera can’t walk through ---------- */
       obstacles.push({
         minX: x - (orientation === 90 ? thickness / 2 : size / 2),
         maxX: x + (orientation === 90 ? thickness / 2 : size / 2),
@@ -239,50 +337,45 @@
     /* ---------------------------------------------------------
        BALLS (mesh + physics) –  First one is cue ball
     --------------------------------------------------------- */
-    //addBall(0xffffff, 0, 1, 0);      // cue
-    //addBall(0xf0ff00, 0.5, 1, 0.4);
-    //addBall(0x000000, 1, 1, 1);
-    //addBall(0x0000ff, 2, 1, 1);
-    //addBall(0x00ff00, 3, 1, 1);
-
-    function addBall(color,x,y,z){
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.1,32,32), new THREE.MeshStandardMaterial({ color, roughness:0.2 }));
+    function addBall(colOrTex,x,y,z){
+      const material = (colOrTex && colOrTex.isTexture) ? new THREE.MeshStandardMaterial({map: colOrTex, roughness: 0.15, metalness: 0.4}) : new THREE.MeshStandardMaterial({ color: colOrTex, roughness: 0.2 });
+      const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.1, 64, 64),     
+      material
+  );
       mesh.castShadow = true; mesh.position.set(x,y,z); scene.add(mesh);
 
       const body = new CANNON.Body({ mass: 0.5, shape: new CANNON.Sphere(ballRadius), material: ballMat });
       
       body.position.set(x,y,z);
-      body.linearDamping  = 0.30;   // tweak 0.25-0.35 to taste
-      body.angularDamping = 0.30;   // NEW – slows spin
+      body.linearDamping  = 0.30;   
+      body.angularDamping = 0.30;   
       world.addBody(body);
 
       physicsObjects.push({ mesh, body, pocketed:false });
       initialBallStates.push({ body, mesh, pos: new THREE.Vector3(x, y, z) });
-      if(color === 0xffffff && !cueBody) cueBody = body;
+      if(colOrTex === 0xffffff && !cueBody) {
+        cueBody = body;
+        cueMesh = mesh;               
+      }
     }
-
-    const ballColors = [          // quick palette, 15 distinct tints
-      0xff0000, 0xffff00, 0x0000ff, 0x00ff00, 0xff8800,
-      0x5500ff, 0xff00ff, 0x000000, 0xcc2222, 0xcccc00,
-      0x2222cc, 0x22cc22, 0xffaa55, 0x8855ff, 0xff55ff
-    ];
 
     (function placeInitialRack(){
       const r   = 0.1, gap = 0.005;
-      const d   = 2*r + gap;               // centre-to-centre spacing
-      const apexX =  3.5;                  // triangle sits near +X cushion
+      const d   = 2*r + gap;               
+      const apexX =  3.5;                  
       let colIdx = 0;
 
-      for (let row = 0; row < 5; row++) {          // 1-2-3-4-5 = 15 balls
-        const ballsThisRow = row + 1;              // grow each row
+      for (let row = 0; row < 5; row++) {  
+        const ballsThisRow = row + 1;      
         for (let n = 0; n < ballsThisRow; n++) {
-          const x = apexX + row * d;               // push each row farther down-table
-          const z = (-row / 2 + n) * d;            // centre the row on z-axis
-          addBall(ballColors[colIdx++], x, 1, z);
-        }
+          const x = apexX + row * d;
+        const z = (-row / 2 + n) * d;
+        const number = row === 0 && n === 0 ? 1 : (row * (row + 1)) / 2 + n;                         
+        addBall(ballTextures[number], x, 1, z);
+      }
       }
 
-      // white cue ball at the other end of the table
       addBall(0xffffff, -4, 1, 0);
     })();
 
@@ -311,7 +404,7 @@
           o.mesh.position.copy(s.pos);
           o.mesh.quaternion.set(0,0,0,1);
           o.mesh.visible = true;
-          o.pocketed = false;          // NEW – revive the ball
+          o.pocketed = false;          
         }
       }
     });
@@ -328,7 +421,7 @@
       velocityY += gravityPlayer; camera.position.y += velocityY;
       if(camera.position.y<=groundLevel){ camera.position.y=groundLevel; velocityY=0; }
       obstacles.forEach(o=>{
-        const pad = 0.3; // player “radius”
+        const pad = 0.3; 
         if(camera.position.x > o.minX - pad && camera.position.x < o.maxX + pad &&
           camera.position.z > o.minZ - pad && camera.position.z < o.maxZ + pad){
             camera.position.x = prevX;
@@ -344,25 +437,43 @@
     const bar = hud.firstElementChild;
 
     let powerStart = null;
-    window.addEventListener('contextmenu', e => e.preventDefault()); // disable menu
+    window.addEventListener('contextmenu', e => e.preventDefault()); 
 
     window.addEventListener('mousedown', e => {
-      if(e.button===2 && controls.isLocked){ // right button
+      if(e.button===2 && controls.isLocked){ 
         powerStart = performance.now();
       }
     });
+    
+    window.addEventListener('mousedown', e => {
+      if(e.button !== 0 || !controls.isLocked) return;  
+      const dir = new THREE.Vector3();
+      camera.getWorldDirection(dir);
+      raycaster.set(camera.position, dir);
+      const hit = raycaster.intersectObject(lightSwitch, false);
+      if(hit.length){
+        rgbMode = !rgbMode;                              
+        lightSwitch.material = rgbMode ? switchMatOn : switchMatOff;
+      }
+    });
+
     window.addEventListener('mouseup', e => {
       if(e.button===2 && powerStart!==null && cueBody){
-        const duration = (performance.now() - powerStart) / 1000; // seconds
-        const power    = Math.min(duration, 1.5);                 // cap at 1.5 s
-        const aimDir   = new THREE.Vector3(); camera.getWorldDirection(aimDir); aimDir.y = 0; aimDir.normalize();
-        const impulse  = new CANNON.Vec3(aimDir.x * power * 4, 0, aimDir.z * power * 4);
-        cueBody.applyImpulse(impulse, cueBody.position);
+        const duration = (performance.now() - powerStart) / 1000; 
+        const power    = Math.min(duration, 1.5);                 
+        const viewDir  = new THREE.Vector3();      
+        camera.getWorldDirection(viewDir);
+        raycaster.set(camera.position, viewDir);
+        const hit = raycaster.intersectObject(cueMesh, false);
+        if(hit.length){
+          const dirXZ = new THREE.Vector3(viewDir.x, 0, viewDir.z).normalize();
+          const impulse = new CANNON.Vec3(dirXZ.x * power * 4, 0, dirXZ.z * power * 4);
+          cueBody.applyImpulse(impulse, cueBody.position);
+        }
         powerStart = null; bar.style.width = '0%';
       }
     });
 
-    // Power HUD update
     function updateHud(){
       if(powerStart!==null){
         const pct = Math.min((performance.now()-powerStart)/1500,1)*100;
@@ -373,26 +484,26 @@
     /* ---------------------------------------------------------
        RENDER / PHYSICS LOOP
     --------------------------------------------------------- */
-    const fixedTimeStep = 1/120; // 120 Hz
+    const fixedTimeStep = 1/120; 
     let   lastTime;
     function animate(time){
       requestAnimationFrame(animate);
       if(lastTime!==undefined){
         world.step(fixedTimeStep, (time-lastTime)/1000);
       }
-      const triggerR2 = (pocketRadius - ballRadius * 0.15) ** 2;   // a bit of margin
+      const triggerR2 = (pocketRadius - ballRadius * 0.15) ** 2;   
       physicsObjects.forEach(o=>{
         if(o.pocketed) return;
         for(const c of pocketCenters){
           const dx = o.body.position.x - c.x;
           const dz = o.body.position.z - c.z;
-          if(dx*dx + dz*dz < triggerR2){       // ←- only XY distance matters
+          if(dx*dx + dz*dz < triggerR2){       
             o.pocketed = true;
 
-            o.mesh.visible = false;            // vanish above the felt
+            o.mesh.visible = false;            
             o.body.velocity.set(0,0,0);
             o.body.angularVelocity.set(0,0,0);
-            o.body.position.set(c.x, -1, c.z); // stash out of sight
+            o.body.position.set(c.x, -1, c.z); 
             break;
           }
         }
@@ -402,8 +513,44 @@
         o.mesh.position.copy(o.body.position);
         o.mesh.quaternion.set(o.body.quaternion.x, o.body.quaternion.y, o.body.quaternion.z, o.body.quaternion.w);
       });
+      aimLine.visible = false;
+        if(controls.isLocked && cueMesh){
+              const viewDir = new THREE.Vector3();
+              camera.getWorldDirection(viewDir);
+              raycaster.set(camera.position, viewDir);
+              const hit = raycaster.intersectObject(cueMesh, false);
+              if(hit.length){
+                const start = cueBody.position;
+                const dirXZ = new THREE.Vector3(viewDir.x,0,viewDir.z).normalize();
+                const end   = new THREE.Vector3(
+                start.x + dirXZ.x * 8,
+                start.y,
+                start.z + dirXZ.z * 8
+                );
+          const posArr = aimLineGeom.attributes.position.array;
+          posArr[0]=start.x; posArr[1]=start.y; posArr[2]=start.z;
+          posArr[3]=end.x;   posArr[4]=end.y;   posArr[5]=end.z;
+          aimLineGeom.attributes.position.needsUpdate = true;
+          aimLine.computeLineDistances();
+          aimLine.visible = true;
+        }
+      }
+
       updateCameraPosition();
       updateHud();
+      if(rgbMode){
+        const hue = (time * 0.0005) % 1;              
+        const col = new THREE.Color().setHSL(hue, 1, 0.5);
+        rgbFixtures.forEach(f=>{
+          f.spot.color.copy(col);
+          f.discMat.emissive.copy(col);
+        });
+      } else {
+        rgbFixtures.forEach(f=>{
+          f.spot.color.set(0xffffff);
+          f.discMat.emissive.set(0xffffff);
+        });
+      }
       renderer.render(scene, camera);
       lastTime = time;
     }
@@ -420,5 +567,6 @@
     </script>
 </head>
 <body>
+  <div id="crosshair"></div>
 </body>
 </html>
