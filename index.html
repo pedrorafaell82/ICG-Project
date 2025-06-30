@@ -362,18 +362,17 @@
 
     (function placeInitialRack(){
       const r   = 0.1, gap = 0.005;
-      const d   = 2*r + gap;               
-      const apexX =  3.5;                  
-      let colIdx = 0;
+      const d   = 2*r + gap;
+      const apexX =  3.5;
 
-      for (let row = 0; row < 5; row++) {  
-        const ballsThisRow = row + 1;      
+      for (let row = 0; row < 5; row++) {
+        const ballsThisRow = row + 1;
         for (let n = 0; n < ballsThisRow; n++) {
           const x = apexX + row * d;
-        const z = (-row / 2 + n) * d;
-        const number = row === 0 && n === 0 ? 1 : (row * (row + 1)) / 2 + n;                         
-        addBall(ballTextures[number], x, 1, z);
-      }
+          const z = (-row / 2 + n) * d;
+          const number = row * (row + 1) / 2 + n + 1;
+          addBall(ballTextures[number], x, 1, z);
+        }
       }
 
       addBall(0xffffff, -4, 1, 0);
